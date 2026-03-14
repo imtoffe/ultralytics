@@ -2156,36 +2156,28 @@ class DenoisingBranch(nn.Module):
     
 class AdaptiveFeatureFusion(nn.Module):
     def __init__(self, channels):
-        super(AdaptiveFeatureFusion, self).__init__()
+        super().__init__()
 
-        # Gating network to generate fusion weights
         self.gate = nn.Sequential(
-            nn.Conv2d(channels * 2, channels, kernel_size=1, bias=False),
+            nn.Conv2d(channels * 2, channels, 1, bias=False),
             nn.BatchNorm2d(channels),
             nn.ReLU(inplace=True),
-            nn.Conv2d(channels, channels, kernel_size=1, bias=False),
-            nn.Sigmoid()  # produces weights between 0 and 1
+            nn.Conv2d(channels, channels, 1, bias=False),
+            nn.Sigmoid()
         )
 
-        # Optional projection after fusion
-        self.project = nn.Conv2d(channels, channels, kernel_size=1, bias=False)
+        self.project = nn.Conv2d(channels, channels, 1, bias=False)
 
-    def forward(self, x, y):
-        """
-        x: feature map (B, C, H, W)
-        y: feature map (B, C, H, W)
-        """
+    def forward(self, x):
+        # x will be a list: [feature1, feature2]
+        x1, x2 = x
 
-        # concatenate features
-        combined = torch.cat([x, y], dim=1)
+        combined = torch.cat([x1, x2], dim=1)
 
-        # generate adaptive weights
         weight = self.gate(combined)
 
-        # adaptive weighted fusion
-        fused = weight * y + (1 - weight) * x
+        fused = weight * x2 + (1 - weight) * x1
 
-        # optional projection
         fused = self.project(fused)
 
         return fused
