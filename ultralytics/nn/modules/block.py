@@ -2122,34 +2122,70 @@ class DenoisingBranch(nn.Module):
         return x + identity
 
 
+# class AdaptiveFeatureFusion(nn.Module):
+#     def __init__(self, c, debug=False):
+#         super().__init__()
+#         assert c % 32 == 0, "Fusion channels must be multiple of 32"
+
+#         self.debug = debug
+
+#         self.conv_align = Conv(c, c, 1, 1)
+
+#         self.branch_weights = nn.Parameter(torch.ones(2))
+
+#         hidden_ch = max(c // 16, 8)
+#         self.ca = nn.Sequential(
+#             nn.AdaptiveAvgPool2d(1),
+#             nn.Conv2d(c, hidden_ch, 1, bias=True),
+#             nn.ReLU(inplace=True),
+#             nn.Conv2d(hidden_ch, c, 1, bias=True),
+#             nn.Sigmoid()
+#         )
+
+#     def forward(self, x):
+#         s, d = x
+
+#         weights = torch.softmax(self.branch_weights, dim=0)
+
+#         fused = weights[0] * s + weights[1] * d
+
+#         fused = self.conv_align(fused)
+#         out = fused * self.ca(fused)
+
+#         return out
+    
 class AdaptiveFeatureFusion(nn.Module):
-    def __init__(self, c, debug=False):
-        super().__init__()
-        assert c % 32 == 0, "Fusion channels must be multiple of 32"
+    def __init__(self, channels):
+        super(AdaptiveFeatureFusion, self).__init__()
 
-        self.debug = debug
-
-        self.conv_align = Conv(c, c, 1, 1)
-
-        self.branch_weights = nn.Parameter(torch.ones(2))
-
-        hidden_ch = max(c // 16, 8)
-        self.ca = nn.Sequential(
-            nn.AdaptiveAvgPool2d(1),
-            nn.Conv2d(c, hidden_ch, 1, bias=True),
+        # Gating network to generate fusion weights
+        self.gate = nn.Sequential(
+            nn.Conv2d(channels * 2, channels, kernel_size=1, bias=False),
+            nn.BatchNorm2d(channels),
             nn.ReLU(inplace=True),
-            nn.Conv2d(hidden_ch, c, 1, bias=True),
-            nn.Sigmoid()
+            nn.Conv2d(channels, channels, kernel_size=1, bias=False),
+            nn.Sigmoid()  # produces weights between 0 and 1
         )
 
-    def forward(self, x):
-        s, d = x
+        # Optional projection after fusion
+        self.project = nn.Conv2d(channels, channels, kernel_size=1, bias=False)
 
-        weights = torch.softmax(self.branch_weights, dim=0)
+    def forward(self, x, y):
+        """
+        x: feature map (B, C, H, W)
+        y: feature map (B, C, H, W)
+        """
 
-        fused = weights[0] * s + weights[1] * d
+        # concatenate features
+        combined = torch.cat([x, y], dim=1)
 
-        fused = self.conv_align(fused)
-        out = fused * self.ca(fused)
+        # generate adaptive weights
+        weight = self.gate(combined)
 
-        return out
+        # adaptive weighted fusion
+        fused = weight * y + (1 - weight) * x
+
+        # optional projection
+        fused = self.project(fused)
+
+        return fused
